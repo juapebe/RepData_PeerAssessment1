@@ -1,20 +1,125 @@
-# Reproducible Research: Peer Assessment 1
+---
+title: 'Reproducible Research: Peer Assessment 1'
+author: "Juan Perez-Bermejo"
+date: "August 16, 2014"
+output: html_document
+---
+
+##Load and process data.
+This code chunk will check if the file is already unzipped. If not, it will unzip it. During the file loading process, it will set the classes of the columns.  Resulting data frame details can be seen in the summary table below.  It will also load dependencies and set options for number display.
+```{r loadData, results='asis'}
+library(xtable)
+library(ggplot2)
+library(reshape2)
+options(scipen=4, digits=2)
+
+if(!file.exists("activity.csv")){
+        unzip("./activity.zip")
+}
+
+act<-read.csv("activity.csv", colClasses=c("integer", "Date", "integer"))
+sum<-xtable(summary(act))
+print(sum, type="html")
+```
 
 
-## Loading and preprocessing the data
+## What is the mean total number of steps taken per day?
+```{r stepsPerDay}
+stepsDay<-tapply(act$steps, act$date, sum, na.rm=T)
+stepsDay<-melt(stepsDay)
+meanStepsDay<-mean(stepsDay$value, na.rm=T)
+medianStepsDay<-median(stepsDay$value, na.rm=T)
+```
+On average, the subject took `r meanStepsDay` steps per day. The median value is `r medianStepsDay`.
 
-
-
-## What is mean total number of steps taken per day?
-
+A histogram depicting the total number of steps per day is shown below. Note that some days had no available records at all (maybe because the subject did not activate the device?). Those are represented as blanks. No single day for which the device was recording presented zero steps.  The histogram reveals that some days the subject walked around twice the average steps per day, while others he just didn't walk much (this can also be due to device malfunction/not being active).
+```{r stepsPerDayPlot}
+sd<-ggplot(data=stepsDay, aes(x=Var1, y=value))
+sd<-sd+geom_bar(stat="identity", fill="blue")
+sd<-sd+labs(title="Total steps taken per day", x="Day (one tick/week)", y="Number of steps")
+sd<-sd+theme(axis.text.x=element_text(angle=90, v=1, h=1))
+sd<-sd+scale_x_discrete(breaks=stepsDay$Var1[seq(1, length(stepsDay[,2]), 8)])
+sd
+```
 
 
 ## What is the average daily activity pattern?
+The plot below shows the average number of steps per day, for each one of the time intervals (times) of the day.
 
+```{r averageActivityPattern}
+actPattern<-tapply(act$steps, act$interval, mean, na.rm=T)
+actPattern<-melt(actPattern)
+maxActInterval<-actPattern$Var1[actPattern$value==max(actPattern$value)]
 
+ap<-ggplot(data=actPattern, aes(x=Var1, y=value))
+ap<-ap+geom_line(stat="identity")
+ap<-ap+labs(title="Average daily activity pattern",
+            x="Time interval (5 mins/ea", y="Average number of steps")
+ap
+```
+  
+The 5 minute interval of the day during which the subject took the higher number of steps was at `r maxActInterval` in the morning. Probably he commutes to work on foot, or maybe goes for a run in the morning?
 
 ## Imputing missing values
+```{r maxMissingValues}
+nMissingVal<-table(complete.cases(act))[1]
+```
+There are in total `r nMissingVal` observations missing in the dataset.  
 
 
+To fill those, I decided to take the average of steps in the same weekday, on the same time interval. I did this as the activity of the individual is most likely the same in the same time interval on the same day of the week. One caveat is that the number of datapoints is different for every weekday.
+
+```{r imputeMissingValues, cache=F}
+act$weekday<-weekdays(act$date)
+
+#Generates a table with average steps per interval per day of the week
+stepsWD<-tapply(act$steps, list(act$interval, act$weekday), mean, na.rm=T)
+stepsWD<-melt(stepsWD)
+act2<-act
+for (n in 1:nrow(act2)){
+        o<-act2[n,]
+        if(!complete.cases(o)){
+                act2[n,]$steps<-stepsWD$value[stepsWD$Var1==o$interval & stepsWD$Var2==o$weekday]
+        }
+}
+```
+  
+This imputation allows us to recalculate the total steps taken per day.  *Note: this code block is identical to the one used in the first plot of the assignment, but this time using the 'filled in' dataset.*  
+```{r plotMissingValues}
+stepsDay2<-tapply(act2$steps, act2$date, sum, na.rm=T)
+stepsDay2<-melt(stepsDay2)
+meanStepsDay2<-mean(stepsDay2$value)
+medianStepsDay2<-median(stepsDay2$value)
+
+sd2<-ggplot(data=stepsDay2, aes(x=Var1, y=value))
+sd2<-sd2+geom_bar(stat="identity", fill="blue")
+sd2<-sd2+labs(title="Total steps taken per day", x="Day (one tick/week)", y="Number of steps")
+sd2<-sd2+theme(axis.text.x=element_text(angle=90, v=1, h=1))
+sd2<-sd2+scale_x_discrete(breaks=stepsDay2$Var1[seq(1, length(stepsDay2[,2]), 8)])
+sd2
+```
+  As it can be observed in the plot, there are still some days on which the individual walks much more (or less) than in others.  The average total steps per day is now `r meanStepsDay2`, median being `r medianStepsDay2`. These values are higher than the ones presented when skipping values, as it is obvious.
 
 ## Are there differences in activity patterns between weekdays and weekends?
+The following piece of code will take the table specifying the weekdays of the measurements that was generated previously, and replace the day of the week with wether it is 'weekend' or 'weekday'. Then, a similar plot to the one on section 3 is used.  
+```{r averageActivityPattern2, cache=F}
+for(m in 1:nrow(act2)){
+        if(act2[m,]$weekday %in% c("Saturday", "Sunday")){
+                act2[m,]$weekday<-"Weekend"
+        }
+        else{
+                act2[m,]$weekday<-"Weekday"
+        }
+}
+
+actPattern2<-tapply(act2$steps, list(act2$interval, act2$weekday), mean, na.rm=T)
+actPattern2<-melt(actPattern2)
+
+ap<-ggplot(data=actPattern2, aes(x=Var1, y=value)) + facet_grid(Var2~.)
+ap<-ap+geom_line(stat="identity")
+ap<-ap+labs(title="Average daily activity pattern",
+            x="Time interval (5 mins/ea)", y="Average number of steps")
+ap
+```
+
+  The plot reveals that subject walks a bit more on weekends. However, the profile seems very similar between one day and other. It is remarkable that, in spite of walking more on weekends,the time interval he walks the most is still ~8:35am, on weekdays. This reinforces the idea that he walks to work.
